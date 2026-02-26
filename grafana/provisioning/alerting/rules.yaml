@@ -6,8 +6,8 @@ groups:
     folder: DeFi Risk
     interval: 5m
     rules:
-      - uid: yearn_var95_high
-        title: Yearn VaR95 High
+      - uid: yearn_liquidation_risk_high
+        title: Yearn Liquidation Risk High
         condition: C
         data:
           - refId: A
@@ -20,7 +20,7 @@ groups:
               rawSql: >
                 SELECT
                   EXTRACT(EPOCH FROM NOW())::bigint AS time,
-                  COALESCE(AVG(var_95_24h), 0) AS value
+                  COALESCE(AVG(liquidation_risk_24h), 0) AS value
                 FROM defi_vault_metrics
                 WHERE vault_slug = 'yearn-finance'
                   AND time >= NOW() - INTERVAL '30 minutes';
@@ -31,7 +31,7 @@ groups:
               expression: A
               conditions:
                 - evaluator:
-                    params: [0.05]
+                    params: [0.60]
                     type: gt
                   operator:
                     type: and
@@ -42,6 +42,6 @@ groups:
         execErrState: Error
         for: 5m
         annotations:
-          summary: yearn-finance VaR95 > 0.05
+          summary: yearn-finance liquidation risk > 0.60
         labels:
           severity: warning

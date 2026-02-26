@@ -1,124 +1,132 @@
 # DeFi Vault Risk Monitoring (TimescaleDB + Grafana)
 
-Production-ready vault risk monitor for:
+Monitoring stack for DeFi vault protocols:
 - yearn-finance
 - beefy
 - morpho-blue
 - pendle
 - aave
 
-## Features
-- TimescaleDB hypertable storage
-- Continuous aggregates (hourly and daily)
-- Compression and retention policies
-- Scheduled ingestion every 15 minutes
-- Risk metrics: volatility, VaR(95%), drawdown, risk score
-- Grafana dashboard provisioning and alert provisioning
+## Current Status
+- This repo is currently running with sample-seeded data in local TimescaleDB.
+- Primary risk metric is `liquidation_risk_24h` (not `risk_score`).
+
+## How The System Works
+- `ingest_vaults.py` fetches protocol TVL data (DefiLlama), computes:
+  - `volatility_24h`
+  - `var_95_24h`
+  - `drawdown_24h`
+  - `liquidation_risk_24h` (bounded 0..1 stress proxy)
+- Data is upserted into `defi_vault_metrics` hypertable.
+- Timescale views surface latest and top liquidation-risk vaults.
+- Grafana reads PostgreSQL/Timescale directly and displays:
+  - TVL time series
+  - current liquidation risk stat
+  - top liquidation-risk vaults table
+  - alert rule on liquidation risk threshold
+
+## Architecture Wireframe
+```text
+                +--------------------------+
+                |  DefiLlama API           |
+                |  /protocol/{vault_slug}  |
+                +------------+-------------+
+                             |
+                             | pull every 15m
+                             v
+                +--------------------------+
+                |  ingest_vaults.py        |
+                |  - parse chart/tvl/apy   |
+                |  - calc liquidation risk  |
+                |  - upsert metrics         |
+                +------------+-------------+
+                             |
+                             | SQL upsert
+                             v
+                +--------------------------+
+                | TimescaleDB (Postgres16) |
+                | hypertable:              |
+                |   defi_vault_metrics     |
+                | views: latest/top-risk   |
+                +------------+-------------+
+                             |
+                             | datasource query
+                             v
+                +--------------------------+
+                | Grafana                  |
+                | Dashboard + Alerting     |
+                +--------------------------+
+```
 
 ## Quick Start
-
-1. Create your own `.env` file from the template:
-
+1. Create `.env` from template:
 ```bash
 cp .env.example .env
 ```
-
-Windows PowerShell:
-
+PowerShell:
 ```powershell
 Copy-Item .env.example .env
 ```
 
-2. Edit `.env` with your own values.
+2. Edit `.env` values.
 
-Example `.env`:
-
-```env
-POSTGRES_USER=defi_admin
-POSTGRES_PASSWORD=change_me_strong
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=defi_risk
-DB_USER=defi_admin
-DB_PASSWORD=change_me_strong
-
-GRAFANA_ADMIN_USER=admin
-GRAFANA_ADMIN_PASSWORD=change_me_grafana
-GRAFANA_ROOT_URL=http://localhost:3000
-
-VAULT_SLUGS=yearn-finance,beefy,morpho-blue,pendle,aave
-POLL_INTERVAL_MINUTES=15
-BACKFILL_DAYS=30
-RATE_LIMIT_SLEEP_SECONDS=0.5
-LOG_LEVEL=INFO
-RUN_ONCE=false
-
-GENERATE_SAMPLE_DATA=false
-SAMPLE_DAYS=14
-```
-
-3. Start infrastructure + ingest worker:
-
+3. Start stack:
 ```bash
 docker compose up --build -d
 ```
 
 4. Open Grafana:
 - URL: `http://localhost:3000`
-- Credentials from `.env`
+- Login from `.env`
 - Dashboard: `DeFi Risk / DeFi Vault Risk Monitoring`
 
-## Run Ingest Locally
+## Sample Data Mode (Current)
+Seed sample data manually:
+```powershell
+docker compose run --rm -e GENERATE_SAMPLE_DATA=true -e SAMPLE_DAYS=30 ingest
+```
 
-```bash
+## Switch To Real Data Ingestion
+The same ingest service already supports real DefiLlama ingestion by default.
+
+1. Ensure `.env` has:
+```env
+GENERATE_SAMPLE_DATA=false
+RUN_ONCE=false
+POLL_INTERVAL_MINUTES=15
+VAULT_SLUGS=yearn-finance,beefy,morpho-blue,pendle,aave
+```
+
+2. Start/Restart ingest service:
+```powershell
+docker compose up -d ingest
+```
+
+3. (Optional) run one immediate real-data cycle:
+```powershell
+docker compose run --rm -e RUN_ONCE=true -e GENERATE_SAMPLE_DATA=false ingest
+```
+
+4. If you want to clear sample rows first:
+```powershell
+docker compose exec timescaledb psql -U $env:POSTGRES_USER -d defi_risk -c "TRUNCATE TABLE defi_vault_metrics;"
+```
+
+## Add New Vaults
+Update in `.env`:
+```env
+VAULT_SLUGS=yearn-finance,beefy,morpho-blue,pendle,aave,new-slug
+```
+
+## Local Python Run (Without Docker Ingest)
+```powershell
 py -3.11 -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements.txt
 .\.venv\Scripts\python ingest_vaults.py
 ```
 
-## Backfill
-
-Run one cycle with custom backfill:
-
-```bash
-set RUN_ONCE=true
-set BACKFILL_DAYS=60
-.\.venv\Scripts\python ingest_vaults.py
-```
-
-## Add New Vaults
-
-Edit `VAULT_SLUGS` in `.env`:
-
-```env
-VAULT_SLUGS=yearn-finance,beefy,morpho-blue,pendle,aave,new-slug
-```
-
-## Generate Sample Data
-
-```bash
-set GENERATE_SAMPLE_DATA=true
-set SAMPLE_DAYS=30
-.\.venv\Scripts\python ingest_vaults.py
-```
-
 ## Production Notes
-- `.env` is gitignored; keep all secrets there and never commit it.
-- Keep `POSTGRES_PASSWORD` and `GRAFANA_ADMIN_PASSWORD` in a secret manager for production.
-- Enable backups/WAL archiving on your database host.
-- Pin image versions in production release tags.
-- Restrict DB and Grafana network access at firewall/VPC level.
-
-## Cloud Deployment
-
-### Timescale Cloud + Grafana Cloud
-1. Create Timescale service and run `init.sql`.
-2. Point ingestion env vars to cloud DB endpoint.
-3. Import dashboard JSON into Grafana Cloud or provision it.
-4. Configure alert contact points in Grafana.
-
-### Render/Fly.io/VM
-1. Deploy TimescaleDB (managed or self-hosted).
-2. Deploy Grafana container with mounted provisioning.
-3. Deploy ingestion worker as an always-on process.
-4. Add monitoring for ingestion success and DB storage growth.
+- `.env` is gitignored; never commit secrets.
+- Use managed secret storage for passwords/tokens.
+- Enable DB backups/WAL archiving.
+- Restrict DB and Grafana network exposure.

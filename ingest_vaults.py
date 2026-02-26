@@ -10,7 +10,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from dotenv import load_dotenv
 from psycopg2.extras import execute_values
 
-from risk_calculations import calculate_drawdown, calculate_risk_score, calculate_volatility_and_var
+from risk_calculations import calculate_drawdown, calculate_liquidation_risk, calculate_volatility_and_var
 
 LLAMA_URL = "https://api.llama.fi/protocol/{}"
 DEFAULT_VAULTS = ["yearn-finance", "beefy", "morpho-blue", "pendle", "aave"]
@@ -18,7 +18,7 @@ DEFAULT_VAULTS = ["yearn-finance", "beefy", "morpho-blue", "pendle", "aave"]
 UPSERT_SQL = """
 INSERT INTO defi_vault_metrics (
     time, vault_slug, chain, tvl_usd, apy, price_usd,
-    volatility_24h, var_95_24h, drawdown_24h, risk_score
+    volatility_24h, var_95_24h, drawdown_24h, liquidation_risk_24h
 ) VALUES %s
 ON CONFLICT (time, vault_slug) DO UPDATE SET
     chain = EXCLUDED.chain,
@@ -28,7 +28,28 @@ ON CONFLICT (time, vault_slug) DO UPDATE SET
     volatility_24h = EXCLUDED.volatility_24h,
     var_95_24h = EXCLUDED.var_95_24h,
     drawdown_24h = EXCLUDED.drawdown_24h,
-    risk_score = EXCLUDED.risk_score;
+    liquidation_risk_24h = EXCLUDED.liquidation_risk_24h;
+"""
+
+
+SCHEMA_PATCH_SQL = """
+ALTER TABLE IF EXISTS defi_vault_metrics
+  ADD COLUMN IF NOT EXISTS liquidation_risk_24h REAL;
+
+CREATE INDEX IF NOT EXISTS idx_defi_metrics_liquidation_risk_desc
+  ON defi_vault_metrics (liquidation_risk_24h DESC);
+
+CREATE OR REPLACE VIEW top_liquidation_risk_vaults AS
+SELECT
+  vault_slug,
+  MAX(time) AS latest_time,
+  MAX(liquidation_risk_24h) AS current_liquidation_risk_24h,
+  AVG(var_95_24h) AS avg_var_95_24h,
+  AVG(volatility_24h) AS avg_volatility_24h
+FROM defi_vault_metrics
+WHERE time >= NOW() - INTERVAL '24 hours'
+GROUP BY vault_slug
+ORDER BY current_liquidation_risk_24h DESC;
 """
 
 
@@ -52,6 +73,12 @@ def db_connect():
         password=os.getenv("DB_PASSWORD", ""),
         connect_timeout=10,
     )
+
+
+def ensure_db_schema(conn):
+    with conn.cursor() as cur:
+        cur.execute(SCHEMA_PATCH_SQL)
+    conn.commit()
 
 
 def fetch_defillama(protocol_slug, session, timeout=20, retries=3):
@@ -184,7 +211,7 @@ def build_rows(vault_slug, chain, apy, price, chart_points, latest_tvl, latest_t
 
         volatility, var_95 = calculate_volatility_and_var(series, window_days=1)
         drawdown = calculate_drawdown(series, window_days=1)
-        risk_score = calculate_risk_score(volatility, var_95, drawdown)
+        liquidation_risk = calculate_liquidation_risk(volatility, var_95, drawdown, apy)
 
         rows.append(
             (
@@ -197,7 +224,7 @@ def build_rows(vault_slug, chain, apy, price, chart_points, latest_tvl, latest_t
                 volatility,
                 var_95,
                 drawdown,
-                risk_score,
+                liquidation_risk,
             )
         )
 
@@ -234,6 +261,7 @@ def run_cycle(vaults, backfill_days, rate_limit_sleep):
     session.headers.update({"User-Agent": "defi-risk-monitor/1.0"})
 
     with db_connect() as conn:
+        ensure_db_schema(conn)
         for slug in vaults:
             try:
                 process_vault(conn, session, slug, backfill_days=backfill_days)
@@ -256,13 +284,28 @@ def seed_sample_data(days=14):
             ts = now - timedelta(hours=(days * 24 - i))
             shock = random.uniform(-0.03, 0.03)
             base = max(1e6, base * (1 + shock))
+            apy = random.uniform(1.0, 12.0)
             vol = abs(shock)
             var95 = vol * 1.5
             dd = max(0.0, vol * 0.8)
-            score = calculate_risk_score(vol, var95, dd)
-            rows.append((ts, vault, "all", float(base), random.uniform(1.0, 12.0), random.uniform(0.5, 3500.0), float(vol), float(var95), float(dd), float(score)))
+            liquidation_risk = calculate_liquidation_risk(vol, var95, dd, apy)
+            rows.append(
+                (
+                    ts,
+                    vault,
+                    "all",
+                    float(base),
+                    float(apy),
+                    random.uniform(0.5, 3500.0),
+                    float(vol),
+                    float(var95),
+                    float(dd),
+                    float(liquidation_risk),
+                )
+            )
 
     with db_connect() as conn:
+        ensure_db_schema(conn)
         count = upsert_rows(conn, rows)
     logging.info("Seeded sample rows=%d", count)
 

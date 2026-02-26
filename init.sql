@@ -17,9 +17,12 @@ CREATE TABLE IF NOT EXISTS defi_vault_metrics (
     volatility_24h REAL,
     var_95_24h REAL,
     drawdown_24h REAL,
-    risk_score REAL,
+    liquidation_risk_24h REAL,
     PRIMARY KEY (time, vault_slug)
 );
+
+ALTER TABLE defi_vault_metrics
+  ADD COLUMN IF NOT EXISTS liquidation_risk_24h REAL;
 
 SELECT create_hypertable(
     'defi_vault_metrics',
@@ -33,7 +36,7 @@ SELECT create_hypertable(
 
 CREATE INDEX IF NOT EXISTS idx_defi_metrics_vault_time_desc ON defi_vault_metrics (vault_slug, time DESC);
 CREATE INDEX IF NOT EXISTS idx_defi_metrics_time_desc ON defi_vault_metrics (time DESC);
-CREATE INDEX IF NOT EXISTS idx_defi_metrics_risk_score_desc ON defi_vault_metrics (risk_score DESC);
+CREATE INDEX IF NOT EXISTS idx_defi_metrics_liquidation_risk_desc ON defi_vault_metrics (liquidation_risk_24h DESC);
 
 ALTER TABLE defi_vault_metrics SET (
   timescaledb.compress,
@@ -65,7 +68,7 @@ SELECT
   AVG(apy) AS avg_apy,
   AVG(volatility_24h) AS avg_volatility_24h,
   AVG(var_95_24h) AS avg_var_95_24h,
-  MAX(risk_score) AS max_risk_score
+  MAX(liquidation_risk_24h) AS max_liquidation_risk_24h
 FROM defi_vault_metrics
 GROUP BY bucket, vault_slug, chain
 WITH NO DATA;
@@ -93,7 +96,7 @@ SELECT
   AVG(apy) AS avg_apy,
   AVG(volatility_24h) AS avg_volatility_24h,
   AVG(var_95_24h) AS avg_var_95_24h,
-  MAX(risk_score) AS max_risk_score
+  MAX(liquidation_risk_24h) AS max_liquidation_risk_24h
 FROM defi_vault_metrics
 GROUP BY bucket, vault_slug, chain
 WITH NO DATA;
@@ -132,18 +135,18 @@ SELECT DISTINCT ON (vault_slug)
   volatility_24h,
   var_95_24h,
   drawdown_24h,
-  risk_score
+  liquidation_risk_24h
 FROM defi_vault_metrics
 ORDER BY vault_slug, time DESC;
 
-CREATE OR REPLACE VIEW top_risky_vaults AS
+CREATE OR REPLACE VIEW top_liquidation_risk_vaults AS
 SELECT
   vault_slug,
   MAX(time) AS latest_time,
-  MAX(risk_score) AS current_risk_score,
+  MAX(liquidation_risk_24h) AS current_liquidation_risk_24h,
   AVG(var_95_24h) AS avg_var_95_24h,
   AVG(volatility_24h) AS avg_volatility_24h
 FROM defi_vault_metrics
 WHERE time >= NOW() - INTERVAL '24 hours'
 GROUP BY vault_slug
-ORDER BY current_risk_score DESC;
+ORDER BY current_liquidation_risk_24h DESC;

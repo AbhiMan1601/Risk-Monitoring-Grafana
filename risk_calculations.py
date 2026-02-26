@@ -38,11 +38,23 @@ def calculate_drawdown(series, window_days=1):
     return float(abs(np.min(drawdowns)))
 
 
-def calculate_risk_score(volatility_24h, var_95_24h, drawdown_24h=None):
+def calculate_liquidation_risk(volatility_24h, var_95_24h, drawdown_24h=None, apy=None):
+    """
+    Liquidation risk proxy in [0, 1].
+    Higher downside volatility/var/drawdown => higher liquidation risk.
+    A modest APY buffer slightly reduces risk.
+    """
     vol = float(volatility_24h) if volatility_24h is not None else 0.0
     var = float(var_95_24h) if var_95_24h is not None else 0.0
     dd = float(drawdown_24h) if drawdown_24h is not None else 0.0
-    return float(var + (vol * 10.0) + (dd * 2.0))
+    apy_value = float(apy) if apy is not None else 0.0
+
+    # Weighted stress proxy calibrated for common hourly TVL return scales.
+    stress = (var * 8.0) + (vol * 6.0) + (dd * 4.0)
+    # APY only provides a small mitigation buffer.
+    buffer = min(max(apy_value / 100.0, 0.0), 0.2)
+    liquidation_risk = stress - buffer
+    return float(min(max(liquidation_risk, 0.0), 1.0))
 
 
 def estimate_impermanent_loss(price_old, price_new):

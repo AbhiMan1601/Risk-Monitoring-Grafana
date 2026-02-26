@@ -10,7 +10,7 @@
       {
         "name": "vault",
         "type": "query",
-        "datasource": {"type": "postgres", "uid": "timescaledb_uid"},
+        "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb_uid"},
         "query": "SELECT DISTINCT vault_slug FROM defi_vault_metrics ORDER BY 1",
         "multi": true,
         "includeAll": true,
@@ -25,11 +25,13 @@
       "type": "timeseries",
       "title": "TVL per Vault",
       "gridPos": {"x": 0, "y": 0, "w": 24, "h": 9},
-      "datasource": {"type": "postgres", "uid": "timescaledb_uid"},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb_uid"},
       "targets": [
         {
           "refId": "A",
+          "editorMode": "code",
           "format": "time_series",
+          "rawQuery": true,
           "rawSql": "SELECT time AS \"time\", tvl_usd AS value, vault_slug AS metric FROM defi_vault_metrics WHERE $__timeFilter(time) AND vault_slug ~ '${vault:regex}' ORDER BY 1"
         }
       ]
@@ -37,14 +39,16 @@
     {
       "id": 2,
       "type": "stat",
-      "title": "Current Risk Score",
+      "title": "Current Liquidation Risk (0-1)",
       "gridPos": {"x": 0, "y": 9, "w": 8, "h": 7},
-      "datasource": {"type": "postgres", "uid": "timescaledb_uid"},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb_uid"},
       "targets": [
         {
           "refId": "A",
+          "editorMode": "code",
           "format": "table",
-          "rawSql": "SELECT MAX(risk_score) AS risk_score FROM latest_metrics WHERE vault_slug ~ '${vault:regex}'"
+          "rawQuery": true,
+          "rawSql": "SELECT MAX(liquidation_risk_24h) AS liquidation_risk_24h FROM latest_metrics WHERE vault_slug ~ '${vault:regex}'"
         }
       ],
       "fieldConfig": {
@@ -63,14 +67,16 @@
     {
       "id": 3,
       "type": "table",
-      "title": "Top 10 Vaults by Risk Score",
+      "title": "Top 10 Vaults by Liquidation Risk",
       "gridPos": {"x": 8, "y": 9, "w": 16, "h": 7},
-      "datasource": {"type": "postgres", "uid": "timescaledb_uid"},
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb_uid"},
       "targets": [
         {
           "refId": "A",
+          "editorMode": "code",
           "format": "table",
-          "rawSql": "SELECT vault_slug, current_risk_score, avg_var_95_24h, avg_volatility_24h, latest_time FROM top_risky_vaults ORDER BY current_risk_score DESC LIMIT 10"
+          "rawQuery": true,
+          "rawSql": "SELECT vault_slug, current_liquidation_risk_24h, avg_var_95_24h, avg_volatility_24h, latest_time FROM top_liquidation_risk_vaults ORDER BY current_liquidation_risk_24h DESC LIMIT 10"
         }
       ]
     }
