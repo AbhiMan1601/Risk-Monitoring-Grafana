@@ -1,4 +1,4 @@
-# DeFi Vault Risk Monitoring (TimescaleDB + Grafana)
+# TimescaleDB + Grafana based Risk Monitoring System for DeFi Vaults
 
 Monitoring stack for DeFi vault protocols:
 - yearn-finance
@@ -80,13 +80,12 @@ docker compose up --build -d
 - Login from `.env`
 - Dashboard: `DeFi Risk / DeFi Vault Risk Monitoring`
 
-## Sample Data Mode (Current)
-Seed sample data manually:
+5. Seed sample data manually:
 ```powershell
 docker compose run --rm -e GENERATE_SAMPLE_DATA=true -e SAMPLE_DAYS=30 ingest
 ```
 
-## Switch To Real Data Ingestion
+## Real Data Ingestion
 The same ingest service already supports real DefiLlama ingestion by default.
 
 1. Ensure `.env` has:
@@ -124,9 +123,3 @@ py -3.11 -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements.txt
 .\.venv\Scripts\python ingest_vaults.py
 ```
-
-## Production Notes
-- `.env` is gitignored; never commit secrets.
-- Use managed secret storage for passwords/tokens.
-- Enable DB backups/WAL archiving.
-- Restrict DB and Grafana network exposure.
