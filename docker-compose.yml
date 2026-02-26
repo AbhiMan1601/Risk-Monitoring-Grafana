@@ -1,0 +1,60 @@
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: morpho-timescaledb
+    environment:
+      POSTGRES_DB: risk_monitor
+      POSTGRES_USER: risk_user
+      POSTGRES_PASSWORD: risk_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+      - ./sql:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U risk_user -d risk_monitor"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  risk-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: morpho-risk-engine
+    environment:
+      DATABASE_URL: postgresql://risk_user:risk_pass@timescaledb:5432/risk_monitor
+      POLL_INTERVAL_SECONDS: 30
+      HISTORY_WINDOW: 180
+      MIN_HISTORY: 30
+      MAD_EPSILON: 0.000001
+      ALERT_Z_THRESHOLD: 3.0
+      WARNING_Z_THRESHOLD: 2.0
+      HEALTH_FACTOR_WARNING: 1.20
+      HEALTH_FACTOR_CRITICAL: 1.05
+      MORPHO_API_URL: ""
+      MORPHO_API_KEY: ""
+      USE_SYNTHETIC_SOURCE: "true"
+      SYNTHETIC_VAULTS: 6
+      LOG_LEVEL: INFO
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:10.4.3
+    container_name: morpho-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      - timescaledb
+
+volumes:
+  timescale_data:
