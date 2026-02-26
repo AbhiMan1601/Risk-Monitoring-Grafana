@@ -7,9 +7,8 @@ Monitoring stack for DeFi vault protocols:
 - pendle
 - aave
 
-## Current Status
-- This repo is currently running with sample-seeded data in local TimescaleDB.
-- Primary risk metric is `liquidation_risk_24h` (not `risk_score`).
+NOTE: This repo is currently running with sample-seeded data in local TimescaleDB.
+
 
 ## How The System Works
 - `ingest_vaults.py` fetches protocol TVL data (DefiLlama), computes:
