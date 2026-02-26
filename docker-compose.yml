@@ -1,60 +1,72 @@
 services:
   timescaledb:
-    image: timescale/timescaledb:latest-pg15
-    container_name: morpho-timescaledb
+    image: timescale/timescaledb:latest-pg16
+    container_name: timescaledb
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: risk_monitor
-      POSTGRES_USER: risk_user
-      POSTGRES_PASSWORD: risk_pass
+      POSTGRES_USER: ${POSTGRES_USER:-defi_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: postgres
+      TZ: UTC
     ports:
       - "5432:5432"
     volumes:
-      - timescale_data:/var/lib/postgresql/data
-      - ./sql:/docker-entrypoint-initdb.d
+      - tsdb_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U risk_user -d risk_monitor"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-defi_admin} -d postgres"]
       interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 12
 
-  risk-engine:
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set in .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000}
+      GF_UNIFIED_ALERTING_ENABLED: "true"
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:3000/api/health | grep -q '\"database\":\"ok\"'"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+
+  ingest:
     build:
       context: .
-      dockerfile: Dockerfile
-    container_name: morpho-risk-engine
+      dockerfile: Dockerfile.ingest
+    container_name: defi-ingest
+    restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://risk_user:risk_pass@timescaledb:5432/risk_monitor
-      POLL_INTERVAL_SECONDS: 30
-      HISTORY_WINDOW: 180
-      MIN_HISTORY: 30
-      MAD_EPSILON: 0.000001
-      ALERT_Z_THRESHOLD: 3.0
-      WARNING_Z_THRESHOLD: 2.0
-      HEALTH_FACTOR_WARNING: 1.20
-      HEALTH_FACTOR_CRITICAL: 1.05
-      MORPHO_API_URL: ""
-      MORPHO_API_KEY: ""
-      USE_SYNTHETIC_SOURCE: "true"
-      SYNTHETIC_VAULTS: 6
-      LOG_LEVEL: INFO
+      DB_HOST: timescaledb
+      DB_PORT: 5432
+      DB_NAME: defi_risk
+      DB_USER: ${POSTGRES_USER:-defi_admin}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      VAULT_SLUGS: ${VAULT_SLUGS:-yearn-finance,beefy,morpho-blue,pendle,aave}
+      POLL_INTERVAL_MINUTES: ${POLL_INTERVAL_MINUTES:-15}
+      BACKFILL_DAYS: ${BACKFILL_DAYS:-30}
+      RATE_LIMIT_SLEEP_SECONDS: ${RATE_LIMIT_SLEEP_SECONDS:-0.5}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      RUN_ONCE: "false"
+      GENERATE_SAMPLE_DATA: "false"
     depends_on:
       timescaledb:
         condition: service_healthy
 
-  grafana:
-    image: grafana/grafana:10.4.3
-    container_name: morpho-grafana
-    environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
-      GF_USERS_ALLOW_SIGN_UP: "false"
-    ports:
-      - "3000:3000"
-    volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning
-      - ./grafana/dashboards:/var/lib/grafana/dashboards
-    depends_on:
-      - timescaledb
-
 volumes:
-  timescale_data:
+  tsdb_data:
+  grafana_data:

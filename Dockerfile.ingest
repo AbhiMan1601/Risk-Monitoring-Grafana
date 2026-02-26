@@ -8,6 +8,7 @@ ENV PYTHONUNBUFFERED=1
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-COPY src /app/src
+COPY ingest_vaults.py /app/ingest_vaults.py
+COPY risk_calculations.py /app/risk_calculations.py
 
-CMD ["python", "-m", "morpho_risk.main"]
+CMD ["python", "/app/ingest_vaults.py"]

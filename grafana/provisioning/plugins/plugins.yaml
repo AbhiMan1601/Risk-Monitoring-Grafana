@@ -1,0 +1,3 @@
+# Placeholder to avoid Grafana startup error for missing plugins provisioning dir.
+apiVersion: 1
+apps: []

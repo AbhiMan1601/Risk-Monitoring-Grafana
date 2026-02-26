@@ -1,0 +1,47 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: vault-risk-rules
+    folder: DeFi Risk
+    interval: 5m
+    rules:
+      - uid: yearn_var95_high
+        title: Yearn VaR95 High
+        condition: C
+        data:
+          - refId: A
+            datasourceUid: timescaledb_uid
+            relativeTimeRange:
+              from: 1800
+              to: 0
+            model:
+              format: table
+              rawSql: >
+                SELECT
+                  EXTRACT(EPOCH FROM NOW())::bigint AS time,
+                  COALESCE(AVG(var_95_24h), 0) AS value
+                FROM defi_vault_metrics
+                WHERE vault_slug = 'yearn-finance'
+                  AND time >= NOW() - INTERVAL '30 minutes';
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    params: [0.05]
+                    type: gt
+                  operator:
+                    type: and
+                  reducer:
+                    type: last
+                  type: query
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: yearn-finance VaR95 > 0.05
+        labels:
+          severity: warning

@@ -1,100 +1,124 @@
-# Morpho Vault Risk Monitoring Prototype
+# DeFi Vault Risk Monitoring (TimescaleDB + Grafana)
 
-This repository contains a working prototype for monitoring Morpho vault health using:
-- TimescaleDB for time-series storage
-- A production-ready robust anomaly detector (median + MAD robust z-score with risk thresholds)
-- Grafana dashboard for risk visualization
+Production-ready vault risk monitor for:
+- yearn-finance
+- beefy
+- morpho-blue
+- pendle
+- aave
 
-## Architecture
-
-- `risk-engine` service ingests vault health factor snapshots and writes to TimescaleDB.
-- A robust detector scores each vault point and writes anomaly events.
-- Grafana reads directly from TimescaleDB with a pre-provisioned dashboard.
+## Features
+- TimescaleDB hypertable storage
+- Continuous aggregates (hourly and daily)
+- Compression and retention policies
+- Scheduled ingestion every 15 minutes
+- Risk metrics: volatility, VaR(95%), drawdown, risk score
+- Grafana dashboard provisioning and alert provisioning
 
 ## Quick Start
 
-### 1. Start services
+1. Create your own `.env` file from the template:
 
 ```bash
-docker compose up --build
+cp .env.example .env
 ```
 
-Services:
-- TimescaleDB: `localhost:5432`
-- Grafana: `http://localhost:3000` (admin/admin)
-- Risk engine: background container logs anomalies each cycle
+Windows PowerShell:
 
-### 2. View dashboard
-
-Open Grafana and navigate to:
-- `Dashboards` -> `Morpho Risk` -> `Morpho Vault Risk Monitoring`
-
-## Data Source Modes
-
-### Synthetic mode (default)
-
-This is enabled by default to provide an immediately working demo.
-- `USE_SYNTHETIC_SOURCE=true`
-- Generates realistic health-factor movement with occasional stress events.
-
-### Morpho API mode
-
-Set environment variables in `docker-compose.yml`:
-- `USE_SYNTHETIC_SOURCE=false`
-- `MORPHO_API_URL=<your endpoint returning vault snapshots JSON>`
-- `MORPHO_API_KEY=<optional bearer token>`
-
-Expected JSON payload:
-
-```json
-[
-  {
-    "vault_id": "eth-usdc-1",
-    "chain_id": 1,
-    "market_id": "market-abc",
-    "health_factor": 1.42,
-    "collateral_value_usd": 1000000,
-    "debt_value_usd": 704225,
-    "timestamp": "2026-02-26T00:00:00Z"
-  }
-]
+```powershell
+Copy-Item .env.example .env
 ```
 
-## Database Schema
+2. Edit `.env` with your own values.
 
-Initialized by `sql/001_init.sql`:
-- `vault_health_metrics` hypertable
-- `anomaly_events` hypertable
-- `detector_state` (state persistence across restarts)
-- `hf_5m` continuous aggregate view for dashboarding
+Example `.env`:
 
-## Anomaly Detection Method
+```env
+POSTGRES_USER=defi_admin
+POSTGRES_PASSWORD=change_me_strong
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=defi_risk
+DB_USER=defi_admin
+DB_PASSWORD=change_me_strong
 
-Implemented in `src/morpho_risk/anomaly.py`:
-- Maintains rolling history per vault
-- Computes robust baseline with median and MAD
-- Calculates robust z-score
-- Applies downside-only risk scoring and health-factor floor thresholds
-- Classifies severity (`warning`, `critical`)
+GRAFANA_ADMIN_USER=admin
+GRAFANA_ADMIN_PASSWORD=change_me_grafana
+GRAFANA_ROOT_URL=http://localhost:3000
 
-This design is resilient to outliers and practical for production monitoring workloads.
+VAULT_SLUGS=yearn-finance,beefy,morpho-blue,pendle,aave
+POLL_INTERVAL_MINUTES=15
+BACKFILL_DAYS=30
+RATE_LIMIT_SLEEP_SECONDS=0.5
+LOG_LEVEL=INFO
+RUN_ONCE=false
 
-## Useful Queries
-
-Recent critical anomalies:
-
-```sql
-SELECT *
-FROM anomaly_events
-WHERE severity = 'critical'
-ORDER BY ts DESC
-LIMIT 50;
+GENERATE_SAMPLE_DATA=false
+SAMPLE_DAYS=14
 ```
 
-Latest health factors per vault:
+3. Start infrastructure + ingest worker:
 
-```sql
-SELECT DISTINCT ON (vault_id) vault_id, ts, health_factor
-FROM vault_health_metrics
-ORDER BY vault_id, ts DESC;
+```bash
+docker compose up --build -d
 ```
+
+4. Open Grafana:
+- URL: `http://localhost:3000`
+- Credentials from `.env`
+- Dashboard: `DeFi Risk / DeFi Vault Risk Monitoring`
+
+## Run Ingest Locally
+
+```bash
+py -3.11 -m venv .venv
+.\.venv\Scripts\python -m pip install -r requirements.txt
+.\.venv\Scripts\python ingest_vaults.py
+```
+
+## Backfill
+
+Run one cycle with custom backfill:
+
+```bash
+set RUN_ONCE=true
+set BACKFILL_DAYS=60
+.\.venv\Scripts\python ingest_vaults.py
+```
+
+## Add New Vaults
+
+Edit `VAULT_SLUGS` in `.env`:
+
+```env
+VAULT_SLUGS=yearn-finance,beefy,morpho-blue,pendle,aave,new-slug
+```
+
+## Generate Sample Data
+
+```bash
+set GENERATE_SAMPLE_DATA=true
+set SAMPLE_DAYS=30
+.\.venv\Scripts\python ingest_vaults.py
+```
+
+## Production Notes
+- `.env` is gitignored; keep all secrets there and never commit it.
+- Keep `POSTGRES_PASSWORD` and `GRAFANA_ADMIN_PASSWORD` in a secret manager for production.
+- Enable backups/WAL archiving on your database host.
+- Pin image versions in production release tags.
+- Restrict DB and Grafana network access at firewall/VPC level.
+
+## Cloud Deployment
+
+### Timescale Cloud + Grafana Cloud
+1. Create Timescale service and run `init.sql`.
+2. Point ingestion env vars to cloud DB endpoint.
+3. Import dashboard JSON into Grafana Cloud or provision it.
+4. Configure alert contact points in Grafana.
+
+### Render/Fly.io/VM
+1. Deploy TimescaleDB (managed or self-hosted).
+2. Deploy Grafana container with mounted provisioning.
+3. Deploy ingestion worker as an always-on process.
+4. Add monitoring for ingestion success and DB storage growth.

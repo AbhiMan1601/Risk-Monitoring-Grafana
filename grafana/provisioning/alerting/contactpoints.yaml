@@ -1,0 +1,18 @@
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: risk-email
+    receivers:
+      - uid: email_receiver_1
+        type: email
+        settings:
+          addresses: risk-team@example.com
+
+  - orgId: 1
+    name: risk-slack
+    receivers:
+      - uid: slack_receiver_1
+        type: slack
+        settings:
+          url: https://hooks.slack.com/services/XXX/YYY/ZZZ

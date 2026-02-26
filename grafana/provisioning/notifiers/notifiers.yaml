@@ -1,0 +1,2 @@
+# Placeholder to avoid Grafana startup error for missing legacy notifiers provisioning dir.
+notifiers: []
